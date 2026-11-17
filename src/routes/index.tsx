@@ -75,9 +75,9 @@ function Inicio() {
           })}
           {lista && filtrados.length === 0 && <p className="py-10 text-center text-muted-foreground">No encontramos prospectos con ese nombre.</p>}
         </ul>
-      </div>
-      <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md bg-gradient-to-t from-background via-background to-transparent px-5 pb-5 pt-8">
-        <Link to="/nuevo" className={btnPrimary}><Plus className="size-5" /> Nuevo prospecto</Link>
+        <div className="mt-6 mb-10">
+          <Link to="/nuevo" className={btnPrimary + " whitespace-nowrap px-6"}><Plus className="size-5 shrink-0" /> Nuevo prospecto</Link>
+        </div>
       </div>
     </Shell>
   );
