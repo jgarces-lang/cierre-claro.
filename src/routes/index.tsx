@@ -32,7 +32,7 @@ function Inicio() {
     <Shell>
       <header className="bg-hero rounded-b-3xl px-5 pb-6 pt-8 text-primary-foreground">
         <p className="text-sm font-medium opacity-80">CierreClaro</p>
-        <h1 className="mt-1 text-2xl font-extrabold">Tus prospectos</h1>
+        <h1 className="mt-1 text-2xl font-extrabold">¿A quién le escribes hoy?</h1>
         <div className="mt-5 grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-primary-foreground/10 p-4">
             <p className="text-3xl font-extrabold">{lista ? activos(lista).length : "–"}</p>
