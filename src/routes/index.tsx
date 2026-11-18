@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Search, Plus, ChevronRight } from "lucide-react";
 import { Shell, Card, EstadoBadge, inputCls, btnPrimary } from "@/components/app-ui";
 import { useProspectos } from "@/lib/prospects";
-import { activos, diasDesde, formatCOP, ordenarPorAtraso, pendientes, DIAS_PENDIENTE } from "@/lib/prospects-core";
+import { activos, diasDesde, formatCOP, ordenarPorAtraso, pendientes, DIAS_PENDIENTE, ESTADOS, type Estado } from "@/lib/prospects-core";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -22,11 +22,14 @@ function diasTexto(d: number) { return d === 0 ? "Hoy" : d === 1 ? "Hace 1 día"
 function Inicio() {
   const lista = useProspectos();
   const [q, setQ] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState<Estado | "Todos">("Todos");
   const filtrados = useMemo(() => {
     if (!lista) return [];
     const t = q.trim().toLowerCase();
-    return ordenarPorAtraso(lista).filter((p) => p.nombre.toLowerCase().includes(t));
-  }, [lista, q]);
+    return ordenarPorAtraso(lista)
+      .filter((p) => p.nombre.toLowerCase().includes(t))
+      .filter((p) => filtroEstado === "Todos" || p.estado === filtroEstado);
+  }, [lista, q, filtroEstado]);
 
   return (
     <Shell>
@@ -49,6 +52,12 @@ function Inicio() {
           <Search className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nombre" aria-label="Buscar por nombre" className={inputCls + " pl-12"} />
         </label>
+        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+          {(["Todos", ...ESTADOS] as const).map((e) => (
+            <button key={e} type="button" onClick={() => setFiltroEstado(e)}
+              className={"h-10 shrink-0 rounded-full border px-4 text-sm font-semibold transition " + (filtroEstado === e ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card")}>{e}</button>
+          ))}
+        </div>
         <ul className="mt-5 space-y-3">
           {filtrados.map((p) => {
             const d = diasDesde(p.ultimoContacto);
@@ -73,7 +82,7 @@ function Inicio() {
               </li>
             );
           })}
-          {lista && filtrados.length === 0 && <p className="py-10 text-center text-muted-foreground">No encontramos prospectos con ese nombre.</p>}
+          {lista && filtrados.length === 0 && <p className="py-10 text-center text-muted-foreground">No encontramos prospectos con ese filtro.</p>}
         </ul>
         <div className="mt-6 mb-10">
           <Link to="/nuevo" className={btnPrimary + " whitespace-nowrap px-6"}><Plus className="size-5 shrink-0" /> Nuevo prospecto</Link>
