@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { z } from "zod";
 import { Shell, inputCls, btnPrimary } from "@/components/app-ui";
 import { crearProspecto } from "@/lib/prospects";
+import { toast } from "sonner";
 import { ESTADOS, ORIGENES, type Estado } from "@/lib/prospects-core";
 
 export const Route = createFileRoute("/nuevo")({
@@ -43,15 +44,23 @@ function Nuevo() {
   const [err, setErr] = useState<Record<string, string>>({});
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
 
-  function submit(e: React.FormEvent) {
+  const [guardando, setGuardando] = useState(false);
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (guardando) return; // evita guardar dos veces si tocan el botón seguido
     const r = schema.safeParse({ ...f, monto: f.monto === "" ? NaN : Number(f.monto.replace(/\D/g, "")) });
     if (!r.success) {
       setErr(Object.fromEntries(r.error.issues.map((i) => [i.path[0], i.message])));
       return;
     }
-    const id = crearProspecto(r.data);
-    nav({ to: "/prospecto/$id", params: { id } });
+    setErr({});
+    setGuardando(true);
+    const res = await crearProspecto(r.data);
+    setGuardando(false);
+    if (res.error || !res.id) { toast.error(res.error ?? "No se pudo guardar el prospecto."); return; }
+    toast.success("Prospecto registrado");
+    nav({ to: "/prospecto/$id", params: { id: res.id } });
   }
 
   return (
@@ -81,7 +90,7 @@ function Nuevo() {
         <Field label="Nota inicial de seguimiento">
           <textarea className={inputCls + " h-28 py-3"} value={f.nota} onChange={set("nota")} placeholder="¿Qué le interesa? ¿Cuándo volver a escribirle?" />
         </Field>
-        <button className={btnPrimary}>Guardar prospecto</button>
+        <button className={btnPrimary} disabled={guardando}>{guardando ? "Guardando…" : "Guardar prospecto"}</button>
       </form>
     </Shell>
   );

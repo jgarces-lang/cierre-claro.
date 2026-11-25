@@ -1,22 +1,28 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { supabase } from "./supabase";
+import { alCambiarSesion } from "./auth";
 import type { Estado, Interaccion, Prospecto } from "./prospects-core";
 
-// Antes los prospectos se guardaban en el navegador (localStorage).
-// Ahora se leen y se guardan en la base de datos de Supabase.
-// Las pantallas no cambian: siguen usando las mismas 4 funciones de este archivo.
+// Capa de datos de CierreClaro: las 3 pantallas leen y escriben SOLO a través de este archivo.
+// Todas las consultas van a Supabase con la sesión del usuario: RLS garantiza que cada
+// usuario solo vea y modifique SUS prospectos.
 
 let cache: Prospecto[] | null = null;
 let cargando = false;
 const subs = new Set<() => void>();
 
-function publicar(next: Prospecto[]) {
+function publicar(next: Prospecto[] | null) {
   cache = next;
   subs.forEach((f) => f());
 }
 const subscribe = (f: () => void) => { subs.add(f); return () => subs.delete(f); };
 
-// Convierte una fila de la base (snake_case) al formato que usa la app.
+// Al entrar o salir de una cuenta se borra lo que había en memoria (nadie ve datos de otro).
+if (typeof window !== "undefined") {
+  alCambiarSesion((s) => { publicar(null); if (s) refrescar(); });
+}
+
+// Fila de la base (snake_case) → formato de la app.
 type FilaInteraccion = { id: string; canal: string; nota: string; created_at: string };
 type FilaProspecto = {
   id: string; nombre: string; contacto: string; origen: string; estado: Estado;
@@ -32,63 +38,87 @@ function aProspecto(f: FilaProspecto): Prospecto {
   };
 }
 
-/** Pide a Supabase todos los prospectos con sus interacciones. */
+/** READ: trae los prospectos ACTIVOS del usuario con su historial. Los archivados no se muestran. */
 export async function refrescar() {
   cargando = true;
-  const { data, error } = await supabase.from("prospectos").select("*, interacciones(*)");
+  const { data, error } = await supabase
+    .from("prospectos")
+    .select("id, nombre, contacto, origen, estado, monto, ultimo_contacto, interacciones(id, canal, nota, created_at)")
+    .eq("activo", true);
   cargando = false;
   if (error) {
-    console.error("Error leyendo prospectos de Supabase:", error.message);
+    console.error("Error leyendo prospectos:", error.message);
     publicar([]);
     return;
   }
   publicar((data as FilaProspecto[]).map(aProspecto));
 }
 
-/** Devuelve null mientras carga; después, la lista de prospectos. */
+/** Devuelve null mientras carga; después, la lista de prospectos activos. */
 export function useProspectos(): Prospecto[] | null {
   useEffect(() => { if (!cache && !cargando) refrescar(); }, []);
   return useSyncExternalStore(subscribe, () => cache, () => null);
 }
 
-function avisarError(accion: string, error: { message: string } | null) {
-  if (error) { console.error(`Error al ${accion}:`, error.message); refrescar(); }
-}
+type Resultado = { error: string | null };
+const ok: Resultado = { error: null };
+const falla = (mensaje: string): Resultado => ({ error: mensaje });
 
-export function crearProspecto(data: { nombre: string; contacto: string; origen: string; estado: Estado; monto: number; nota: string }) {
+/** CREATE: guarda un prospecto nuevo y, si hay nota inicial, su primera interacción. */
+export async function crearProspecto(d: { nombre: string; contacto: string; origen: string; estado: Estado; monto: number; nota: string }): Promise<Resultado & { id?: string }> {
   const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const interacciones: Interaccion[] = data.nota ? [{ id: crypto.randomUUID(), fecha: now, canal: data.origen, nota: data.nota }] : [];
-  // 1) Se muestra de inmediato en pantalla...
-  publicar([{ id, nombre: data.nombre, contacto: data.contacto, origen: data.origen, estado: data.estado, monto: data.monto, ultimoContacto: now, interacciones }, ...(cache ?? [])]);
-  // 2) ...y se guarda en la base.
-  (async () => {
-    const { error } = await supabase.from("prospectos").insert({
-      id, nombre: data.nombre, contacto: data.contacto, origen: data.origen, estado: data.estado, monto: data.monto, ultimo_contacto: now,
-    });
-    if (error) return avisarError("crear el prospecto", error);
-    const i = interacciones[0];
-    if (i) {
-      const r = await supabase.from("interacciones").insert({ id: i.id, prospecto_id: id, canal: i.canal, nota: i.nota });
-      avisarError("guardar la nota inicial", r.error);
-    }
-  })();
-  return id;
+  const { error } = await supabase.from("prospectos").insert({
+    id, nombre: d.nombre, contacto: d.contacto, origen: d.origen, estado: d.estado, monto: d.monto,
+  });
+  if (error) return falla("No se pudo guardar el prospecto. Intenta de nuevo.");
+  if (d.nota) {
+    const canal = ["WhatsApp", "Instagram"].includes(d.origen) ? d.origen : "WhatsApp";
+    const r = await supabase.from("interacciones").insert({ prospecto_id: id, canal, nota: d.nota });
+    if (r.error) console.error("La nota inicial no se guardó:", r.error.message);
+  }
+  await refrescar();
+  return { error: null, id };
 }
 
-export function cambiarEstado(id: string, estado: Estado) {
-  publicar((cache ?? []).map((p) => (p.id === id ? { ...p, estado } : p)));
-  supabase.from("prospectos").update({ estado }).eq("id", id)
-    .then(({ error }) => avisarError("cambiar el estado", error));
+/** UPDATE simple: corrige los datos básicos del prospecto. */
+export async function editarProspecto(id: string, d: { nombre: string; contacto: string; origen: string; monto: number }): Promise<Resultado> {
+  const { error } = await supabase.from("prospectos").update(d).eq("id", id);
+  if (error) return falla("No se pudieron guardar los cambios. Intenta de nuevo.");
+  await refrescar();
+  return ok;
 }
 
-export function agregarInteraccion(id: string, canal: string, nota: string) {
-  const i: Interaccion = { id: crypto.randomUUID(), fecha: new Date().toISOString(), canal, nota };
-  publicar((cache ?? []).map((p) => (p.id === id ? { ...p, ultimoContacto: i.fecha, interacciones: [i, ...p.interacciones] } : p)));
-  (async () => {
-    const r1 = await supabase.from("interacciones").insert({ id: i.id, prospecto_id: id, canal, nota });
-    if (r1.error) return avisarError("guardar la interacción", r1.error);
-    const r2 = await supabase.from("prospectos").update({ ultimo_contacto: i.fecha }).eq("id", id);
-    avisarError("actualizar el último contacto", r2.error);
-  })();
+/** UPDATE con regla: para cerrar una venta el monto debe ser mayor a $0. */
+export async function cambiarEstado(id: string, estado: Estado): Promise<Resultado> {
+  const p = cache?.find((x) => x.id === id);
+  if (estado === "Cerrado" && (!p || p.monto <= 0)) {
+    return falla("Para cerrar la venta, primero edita el prospecto y escribe el monto vendido.");
+  }
+  const { error } = await supabase.from("prospectos").update({ estado }).eq("id", id);
+  if (error) return falla("No se pudo cambiar el estado. Intenta de nuevo.");
+  await refrescar();
+  return ok;
+}
+
+/**
+ * UPDATE con lógica de negocio (la operación central del happy path).
+ * Llama a la función registrar_interaccion de la base, que en UNA transacción:
+ * valida las reglas → guarda la interacción → actualiza el último contacto
+ * → y si el prospecto estaba en "Nuevo" lo pasa a "En Seguimiento".
+ */
+export async function registrarInteraccion(id: string, canal: string, nota: string): Promise<Resultado> {
+  if (!nota.trim()) return falla("Escribe qué hablaron con el cliente.");
+  if (nota.length > 500) return falla("La nota no puede pasar de 500 caracteres.");
+  const { error } = await supabase.rpc("registrar_interaccion", { p_prospecto_id: id, p_canal: canal, p_nota: nota.trim() });
+  if (error) return falla(error.message || "No se pudo registrar la interacción.");
+  await refrescar();
+  return ok;
+}
+
+/** DELETE lógico: el prospecto se archiva (activo = false). La fila y su historia NO se borran. */
+export async function archivarProspecto(id: string): Promise<Resultado> {
+  const { error } = await supabase.from("prospectos").update({ activo: false }).eq("id", id);
+  if (error) return falla("No se pudo archivar el prospecto. Intenta de nuevo.");
+  await refrescar();
+  return ok;
 }
