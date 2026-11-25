@@ -146,7 +146,7 @@ function AsistenteDelDia() {
           {texto && <p className="whitespace-pre-line text-sm leading-relaxed">{texto}</p>}
           {lista.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {lista.slice(0, 3).map((p) => (
+              {elegidos(texto, lista).map((p) => (
                 <Link key={p.id} to="/prospecto/$id" params={{ id: p.id }} className="rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-primary">
                   {p.nombre.split(" ")[0]} · {p.dias} días →
                 </Link>
@@ -158,4 +158,14 @@ function AsistenteDelDia() {
       )}
     </Card>
   );
+}
+
+/** Accesos directos a los prospectos que la IA eligió (en el orden en que los nombró). */
+function elegidos(texto: string | null, lista: { id: string; nombre: string; dias: number }[]) {
+  if (!texto) return lista.slice(0, 3);
+  const t = texto.toLowerCase();
+  const nombrados = lista
+    .filter((p) => t.includes(p.nombre.toLowerCase()) || t.includes(p.nombre.split(" ")[0]!.toLowerCase()))
+    .sort((a, b) => t.indexOf(a.nombre.split(" ")[0]!.toLowerCase()) - t.indexOf(b.nombre.split(" ")[0]!.toLowerCase()));
+  return (nombrados.length ? nombrados : lista).slice(0, 3);
 }

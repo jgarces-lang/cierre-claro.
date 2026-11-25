@@ -37,17 +37,19 @@ async function clienteDelUsuario(token: string) {
 async function llamarGemini(tarea: string): Promise<{ texto: string | null; error: string | null }> {
   const llave = process.env["GEMINI_API_KEY"];
   if (!llave) return { texto: null, error: "La IA no está configurada todavía (falta la llave en el servidor)." };
-  const modelos = [process.env["GEMINI_MODEL"], "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"].filter(Boolean) as string[];
+  // Primero el modelo rápido y económico (flash-lite); si no está disponible, los siguientes.
+  const modelos = [process.env["GEMINI_MODEL"], "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-flash"].filter(Boolean) as string[];
   let ultimoError = "No hay un modelo de IA disponible para esta llave.";
   for (const modelo of modelos) {
     try {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
         method: "POST",
+        signal: AbortSignal.timeout(20_000), // si un modelo se demora más de 20 s, probamos otro
         headers: { "Content-Type": "application/json", "x-goog-api-key": llave },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: INSTRUCCION_PRODUCTO }] },
           contents: [{ role: "user", parts: [{ text: tarea }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+          generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
         }),
       });
       if (r.status === 404) { console.error(`Gemini: el modelo ${modelo} no existe (404)`); continue; } // ese modelo no existe en esta cuenta: probamos el siguiente
@@ -65,8 +67,10 @@ async function llamarGemini(tarea: string): Promise<{ texto: string | null; erro
       const texto: string = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("").trim();
       if (!texto) return { texto: null, error: "La IA no generó respuesta. Intenta de nuevo." };
       return { texto, error: null };
-    } catch {
-      return { texto: null, error: "No hubo conexión con la IA. Revisa tu internet e intenta de nuevo." };
+    } catch (e) {
+      console.error(`Gemini ${modelo}: sin respuesta`, e);
+      ultimoError = "La IA se demoró demasiado en responder. Intenta de nuevo.";
+      continue;
     }
   }
   return { texto: null, error: ultimoError };
