@@ -1,4 +1,7 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { Loader2 } from "lucide-react";
+import { useSesion } from "@/lib/auth";
 import type { Estado } from "@/lib/prospects-core";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +14,18 @@ const estadoClass: Record<Estado, string> = {
 export function EstadoBadge({ estado }: { estado: Estado }) {
   return <span className={cn("inline-flex rounded-full px-3 py-1 text-xs font-semibold", estadoClass[estado])}>{estado}</span>;
 }
+/** Contenedor de las pantallas privadas: sin sesión, manda al login. */
 export function Shell({ children }: { children: ReactNode }) {
+  const sesion = useSesion();
+  const navigate = useNavigate();
+  useEffect(() => { if (sesion === null) navigate({ to: "/login" }); }, [sesion, navigate]);
+  if (!sesion) {
+    return (
+      <div className="mx-auto flex min-h-screen w-full max-w-md items-center justify-center bg-background">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-label="Cargando" />
+      </div>
+    );
+  }
   return <div className="mx-auto min-h-screen w-full max-w-md bg-background pb-32">{children}</div>;
 }
 export function Card({ children, className }: { children: ReactNode; className?: string | undefined }) {
