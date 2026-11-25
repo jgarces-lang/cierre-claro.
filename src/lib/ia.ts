@@ -38,6 +38,7 @@ async function llamarGemini(tarea: string): Promise<{ texto: string | null; erro
   const llave = process.env["GEMINI_API_KEY"];
   if (!llave) return { texto: null, error: "La IA no está configurada todavía (falta la llave en el servidor)." };
   const modelos = [process.env["GEMINI_MODEL"], "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"].filter(Boolean) as string[];
+  let ultimoError = "No hay un modelo de IA disponible para esta llave.";
   for (const modelo of modelos) {
     try {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
@@ -49,9 +50,17 @@ async function llamarGemini(tarea: string): Promise<{ texto: string | null; erro
           generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
         }),
       });
-      if (r.status === 404) continue; // ese modelo no existe en esta cuenta: probamos el siguiente
+      if (r.status === 404) { console.error(`Gemini: el modelo ${modelo} no existe (404)`); continue; } // ese modelo no existe en esta cuenta: probamos el siguiente
       if (r.status === 429) return { texto: null, error: "Se alcanzó el límite gratuito de la IA. Intenta en un minuto." };
-      if (!r.ok) return { texto: null, error: "La IA no respondió. Intenta de nuevo." };
+      if (!r.ok) {
+        const detalle = await r.text().catch(() => "");
+        console.error(`Gemini ${modelo} respondió ${r.status}:`, detalle.slice(0, 500));
+        if (/API key not valid|API_KEY_INVALID/i.test(detalle)) return { texto: null, error: "La llave de Gemini no es válida. Revisa GEMINI_API_KEY en Vercel." };
+        if (r.status === 403) return { texto: null, error: "La llave de Gemini no tiene permiso para usar la API (403)." };
+        if (r.status === 400 && /model/i.test(detalle)) continue; // modelo no soportado: probamos el siguiente
+        if (r.status >= 500) { ultimoError = `La IA está saturada en este momento (código ${r.status}). Intenta de nuevo.`; continue; }
+        return { texto: null, error: `La IA no respondió (código ${r.status}). Intenta de nuevo.` };
+      }
       const j = await r.json();
       const texto: string = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("").trim();
       if (!texto) return { texto: null, error: "La IA no generó respuesta. Intenta de nuevo." };
@@ -60,7 +69,7 @@ async function llamarGemini(tarea: string): Promise<{ texto: string | null; erro
       return { texto: null, error: "No hubo conexión con la IA. Revisa tu internet e intenta de nuevo." };
     }
   }
-  return { texto: null, error: "No hay un modelo de IA disponible para esta llave." };
+  return { texto: null, error: ultimoError };
 }
 
 // =====================================================================
